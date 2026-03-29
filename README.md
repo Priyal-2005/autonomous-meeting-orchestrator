@@ -1,5 +1,7 @@
 # 🎯 Autonomous Meeting → Action Orchestrator
 
+> **An evolving AI system with memory, predictive intelligence, and autonomous decision-making — simulating a real enterprise command center.**
+
 > **Enterprise AI Command Center** — A production-quality multi-agent system that autonomously transforms raw meeting transcripts into executable enterprise workflows with real-time tracking, intelligent risk detection, and fully autonomous corrective actions.
 
 ![Python](https://img.shields.io/badge/Python-3.10+-blue)
@@ -64,9 +66,23 @@ streamlit run app.py
 | 🧠 **Risk Intelligence** | Detects missing owners, overloaded team members, blockers, and dependency chains |
 | ⚡ **Task Automation** | Creates structured P0/P1/P2 tasks with deadlines, risk flags, and ownership |
 | 📊 **Time Simulation** | Deterministic Day 1→3 simulation with realistic status progression |
-| 🤖 **Autonomous Actions** | Auto-assigns owners, escalates P0s, redistributes overloaded tasks, sends reminders |
+| 🤖 **Autonomous Actions (LLM-powered decision engine)** | Auto-assigns owners, escalates P0s, redistributes overloaded tasks, sends reminders |
+| 🧠 **Predictive AI** | Anticipates delays before they occur |
+| 💾 **Persistent Memory** | Tracks tasks and owner performance across runs |
 | 📜 **Full Audit Trail** | Chronological log with agent-specific colors, severity indicators, and expandable reasoning |
 | 🎯 **Works Offline** | Full functionality without any API key via Smart Extraction Engine |
+
+---
+
+## 🧠 Advanced Capabilities (Phase 2 Enhancements)
+
+| Capability | Description |
+|---|---|
+| **1. Persistent Memory System** | • Tracks tasks across runs<br>• Stores owner performance metrics (delay rate, completion rate) |
+| **2. Predictive Risk Intelligence** | • Predicts delays BEFORE they happen<br>• Uses heuristic scoring + historical memory data |
+| **3. LLM Decision Engine** | • Employs Gemini AI for dynamic, contextual choices<br>• Goes beyond extraction—executes actual pipeline decisions (auto-assign, reassign, escalate) |
+| **4. Real-World Integrations** | • Simulated mock endpoints for Slack & Email<br>• Fires realistic notifications and escalations demonstrating production readiness |
+| **5. Adaptive Learning System** | • Improves ongoing decisions using past data<br>• Automatically detects bottleneck owners over prolonged iterations |
 
 ---
 
@@ -227,11 +243,21 @@ google-generativeai>=0.5.0  # Optional — for AI mode
 4. **Determinism** — Time simulation produces consistent results for demo reliability
 5. **Autonomy** — Decision agent always acts — never passive, always adds value
 
-## 🧠 Why This Wins
+## 🏢 Enterprise Readiness
 
-Unlike traditional meeting assistants, this system:
-- Doesn’t just extract → it executes
-- Doesn’t just suggest → it acts autonomously
-- Doesn’t just track → it predicts and prevents failure
+- **Multi-agent architecture** (modular + scalable)
+- **Audit trail** for compliance
+- **Deterministic simulation** for reproducibility
+- **Offline fallback** (no API dependency)
+- **Integration-ready** (Slack, Email, APIs)
 
-This is a true Agentic AI system.
+## 🎯 Why This Wins
+
+- **Not a chatbot** → a full workflow system
+- **Takes actions**, not just suggestions
+- **Simulates real enterprise operations**
+- **Shows AI orchestration + autonomy**
+- **Combines reasoning + execution + monitoring**
+
+## Deployed Streamlit App Link
+https://autonomous-meeting-orchestrator.streamlit.app/
