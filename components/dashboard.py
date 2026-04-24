@@ -19,10 +19,24 @@ def h(text: str) -> str:
     return _html.escape(str(text))
 
 
-def render_summary_banner(total_tasks: int, issues_detected: int, actions_taken: int, llm_mode: str):
+def render_summary_banner(
+    total_tasks: int,
+    issues_detected: int,
+    actions_taken: int,
+    llm_mode: str,
+    pipeline_status: str = "complete",
+):
     """Render a prominent summary banner after pipeline execution."""
+    is_ok = pipeline_status == "complete"
+    banner_cls = "summary-banner" + ("" if is_ok else " summary-banner-error")
+    footer_cls = "summary-banner-label" + ("" if is_ok else " summary-error")
+    if is_ok:
+        footer_text = "Pipeline complete — 5 agents finished successfully"
+    else:
+        footer_text = "Pipeline stopped with errors — review alerts and audit trail"
+
     st.markdown(f"""
-    <div class="summary-banner">
+    <div class="{banner_cls}">
         <div class="summary-banner-inner">
             <div class="summary-stat">
                 <div class="summary-stat-icon">📋</div>
@@ -45,10 +59,67 @@ def render_summary_banner(total_tasks: int, issues_detected: int, actions_taken:
             <div class="summary-stat">
                 <div class="summary-stat-icon">⚙️</div>
                 <div class="summary-stat-value" style="font-size: 0.9rem; color: #6C63FF;">LIVE</div>
-                <div class="summary-stat-label">{llm_mode}</div>
+                <div class="summary-stat-label">{h(llm_mode)}</div>
             </div>
         </div>
-        <div class="summary-banner-label">✅ Pipeline Executed Successfully — 5 Agents Completed</div>
+        <div class="{footer_cls}">{"✅" if is_ok else "⛔"} {footer_text}</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+
+def render_pipeline_error_alert(agent_errors: str | None):
+    """Red alert when the orchestration pipeline failed."""
+    detail = h(agent_errors) if agent_errors else "An agent returned an error. Partial results may be shown below."
+    st.markdown(f"""
+    <div class="error-alert-banner">
+        <div class="alert-icon">⛔</div>
+        <div class="alert-body">
+            <div class="alert-title">Pipeline error</div>
+            <div class="alert-text">{detail}</div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+
+def render_executive_metrics_bar(tasks: list, stats: dict, overall_risk: str | None):
+    """Top SaaS-style metrics: total, completed, delayed, risk level."""
+    total = len(tasks) if tasks else stats.get("total", 0)
+    completed = stats.get("completed", 0)
+    delayed = stats.get("delayed", 0)
+    risk = (overall_risk or "UNKNOWN").upper()
+    risk_class = "risk-high" if risk == "HIGH" else "risk-medium" if risk == "MEDIUM" else "risk-low"
+    risk_display = h(risk)
+
+    st.markdown(
+        '<div class="section-header">'
+        '<span class="header-icon">📈</span> Executive overview'
+        '<span class="header-badge">LIVE METRICS</span>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(f"""
+    <div class="exec-metrics-row">
+        <div class="exec-metric-card">
+            <div class="exec-metric-label">Total tasks</div>
+            <div class="exec-metric-value">{total}</div>
+            <div class="exec-metric-sub">In registry for this run</div>
+        </div>
+        <div class="exec-metric-card">
+            <div class="exec-metric-label">Completed</div>
+            <div class="exec-metric-value" style="color: #4ADE80;">{completed}</div>
+            <div class="exec-metric-sub">Done / closed out</div>
+        </div>
+        <div class="exec-metric-card">
+            <div class="exec-metric-label">Delayed</div>
+            <div class="exec-metric-value" style="color: #FFB800;">{delayed}</div>
+            <div class="exec-metric-sub">Needs attention</div>
+        </div>
+        <div class="exec-metric-card {risk_class}">
+            <div class="exec-metric-label">Risk level</div>
+            <div class="exec-metric-value" style="font-size: 1.35rem;">{risk_display}</div>
+            <div class="exec-metric-sub">From Intelligence agent</div>
+        </div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -100,82 +171,109 @@ def render_task_table(tasks: list):
         return
 
     for task in tasks:
+        praw = (task.get("priority") or "P2").lower()
+        accent = "#FF4B4B" if praw == "p0" else "#FFB800" if praw == "p1" else "#22C55E"
+
         with st.container(border=True):
-            cols = st.columns([1.5, 3.5, 2, 2, 2])
+            accent_col, main_col = st.columns([0.04, 0.96])
+            with accent_col:
+                st.markdown(
+                    f'<div style="width:4px; min-height:100%; min-height:5rem; background:{accent}; '
+                    f'border-radius:4px; margin-top:2px;"></div>',
+                    unsafe_allow_html=True,
+                )
+            with main_col:
+                cols = st.columns([1.5, 3.5, 2, 2, 2])
 
-            # Status badge
-            status = task.get("status", "pending")
-            status_icon = {"completed": "✅", "in-progress": "🔄", "pending": "⏳", "delayed": "⚠️", "blocked": "🚫"}.get(status, "")
-            status_badge = f'<span class="badge badge-{status}">{status_icon} {status.upper()}</span>'
+                # Status badge
+                status = task.get("status", "pending")
+                status_icon = {"completed": "✅", "in-progress": "🔄", "pending": "⏳", "delayed": "⚠️", "blocked": "🚫"}.get(status, "")
+                status_badge = f'<span class="badge badge-{status}">{status_icon} {status.upper()}</span>'
 
-            # Priority badge
-            priority = task.get("priority", "P2")
-            priority_badge = f'<span class="badge badge-{priority.lower()}">{priority}</span>'
+                # Priority badge
+                priority = task.get("priority", "P2")
+                priority_badge = f'<span class="badge badge-{priority.lower()}">{priority}</span>'
 
-            # Risk flag
-            risk = task.get("risk_flag", "LOW")
-            risk_badge = f'<span class="badge badge-{risk.lower()}">{risk}</span>'
-            
-            if task.get("predicted_delay"):
-                conf = task.get("confidence_score", 0)
-                risk_badge += f'&nbsp;<span class="badge badge-high" style="background: rgba(255, 184, 0, 0.1); color: #FFB800; border-color: rgba(255, 184, 0, 0.3);" title="Predicted Delay based on historical memory">🔮 Risk: {conf}%</span>'
+                # Risk flag
+                risk = task.get("risk_flag", "LOW")
+                risk_badge = f'<span class="badge badge-{risk.lower()}">{risk}</span>'
 
+                if task.get("predicted_delay"):
+                    conf = task.get("confidence_score", 0)
+                    risk_badge += (
+                        '&nbsp;<span class="badge badge-high" style="background: rgba(255, 184, 0, 0.1); color: #FFB800; '
+                        'border-color: rgba(255, 184, 0, 0.3);" title="Predicted delay from memory heuristics">'
+                        f"🔮 Risk: {conf}%</span>"
+                    )
 
-            # Owner
-            owner = task.get("owner", "UNASSIGNED")
-            owner_display = h(owner)
-            if owner == "UNASSIGNED":
-                owner_display = '<span style="color: #FF4B4B; font-weight: 600;">⚠️ UNASSIGNED</span>'
-            elif task.get("auto_assigned"):
-                owner_display = f'<span style="color: #00D4AA;" title="Auto-assigned by AI">{h(owner)} 🤖</span>'
-            elif task.get("reassigned"):
-                owner_display = f'<span style="color: #F093FB;" title="Reassigned by AI">{h(owner)} 🔄</span>'
-            elif task.get("redistributed"):
-                owner_display = f'<span style="color: #FFB800;" title="Redistributed by AI">{h(owner)} ⚖️</span>'
+                # Owner
+                owner = task.get("owner", "UNASSIGNED")
+                owner_display = h(owner)
+                if owner == "UNASSIGNED":
+                    owner_display = '<span style="color: #FF4B4B; font-weight: 600;">⚠️ UNASSIGNED</span>'
+                elif task.get("auto_assigned"):
+                    owner_display = f'<span style="color: #00D4AA;" title="Auto-assigned by AI">{h(owner)} 🤖</span>'
+                elif task.get("reassigned"):
+                    owner_display = f'<span style="color: #F093FB;" title="Reassigned by AI">{h(owner)} 🔄</span>'
+                elif task.get("redistributed"):
+                    owner_display = f'<span style="color: #FFB800;" title="Redistributed by AI">{h(owner)} ⚖️</span>'
 
-            # Progress bar HTML
-            progress = task.get("progress", 0)
-            if status == "completed":
-                progress = 100
-            elif status == "pending" and progress == 0:
-                progress = 0
-            progress_color = "green" if progress >= 75 else "blue" if progress >= 40 else "yellow" if progress > 0 else "red"
-            progress_html = (
-                f'<div style="margin-top: 0.5rem; margin-bottom: 0.2rem;" class="progress-bar-container">'
-                f'<div class="progress-bar-fill progress-{progress_color}" style="width: {progress}%;"></div>'
-                f'</div>'
-                f'<div style="font-size: 0.75rem; color: #8B8FA3; text-align: right;">{progress}%</div>'
-            )
+                # Progress bar HTML
+                progress = task.get("progress", 0)
+                if status == "completed":
+                    progress = 100
+                elif status == "pending" and progress == 0:
+                    progress = 0
+                progress_color = (
+                    "green" if progress >= 75 else "blue" if progress >= 40 else "yellow" if progress > 0 else "red"
+                )
+                progress_html = (
+                    f'<div style="margin-top: 0.5rem; margin-bottom: 0.2rem;" class="progress-bar-container">'
+                    f'<div class="progress-bar-fill progress-{progress_color}" style="width: {progress}%;"></div>'
+                    f"</div>"
+                    f'<div style="font-size: 0.75rem; color: #8B8FA3; text-align: right;">{progress}%</div>'
+                )
 
-            # Task info
-            task_id = h(task.get("id", ""))
-            title = h(task.get("title", ""))
-            if task.get("ai_decision"):
-                 title += ' <span style="font-size: 0.65rem; color: #6C63FF; border: 1px solid rgba(108, 99, 255, 0.4); background: rgba(108, 99, 255, 0.1); padding: 1px 4px; border-radius: 4px; margin-left: 5px;">🤖 Groq</span>'
-            deadline = h(task.get("deadline", "—"))
+                # Task info
+                task_id = h(task.get("id", ""))
+                title = h(task.get("title", ""))
+                if task.get("ai_decision"):
+                    title += (
+                        ' <span style="font-size: 0.65rem; color: #6C63FF; border: 1px solid rgba(108, 99, 255, 0.4); '
+                        'background: rgba(108, 99, 255, 0.1); padding: 1px 4px; border-radius: 4px; margin-left: 5px;">🤖 Groq</span>'
+                    )
+                deadline = h(task.get("deadline", "—"))
 
-            # Render columns
-            with cols[0]:
-                st.markdown(f"**{task_id}**")
-                st.markdown(priority_badge, unsafe_allow_html=True)
-            
-            with cols[1]:
-                st.markdown(f"<div style='font-size: 0.95rem; font-weight: 500; margin-bottom: 0.3rem;'>{title}</div>", unsafe_allow_html=True)
-                if risk != "LOW":
-                    st.markdown(f"<div style='margin-top: 0.2rem;'>{risk_badge}</div>", unsafe_allow_html=True)
+                with cols[0]:
+                    st.markdown(f"**{task_id}**")
+                    st.markdown(priority_badge, unsafe_allow_html=True)
 
-            with cols[2]:
-                st.markdown("<div style='color: #8B8FA3; font-size: 0.75rem; margin-bottom: 0.2rem;'>Owner</div>", unsafe_allow_html=True)
-                st.markdown(owner_display, unsafe_allow_html=True)
-            
-            with cols[3]:
-                st.markdown("<div style='color: #8B8FA3; font-size: 0.75rem; margin-bottom: 0.2rem;'>Status & Deadline</div>", unsafe_allow_html=True)
-                st.markdown(status_badge, unsafe_allow_html=True)
-                st.markdown(f"<div style='font-size: 0.8rem; margin-top: 0.3rem;'>{deadline}</div>", unsafe_allow_html=True)
-            
-            with cols[4]:
-                st.markdown("<div style='color: #8B8FA3; font-size: 0.75rem;'>Progress</div>", unsafe_allow_html=True)
-                st.markdown(progress_html, unsafe_allow_html=True)
+                with cols[1]:
+                    st.markdown(
+                        f"<div style='font-size: 0.95rem; font-weight: 500; margin-bottom: 0.3rem;'>{title}</div>",
+                        unsafe_allow_html=True,
+                    )
+                    if risk != "LOW":
+                        st.markdown(f"<div style='margin-top: 0.2rem;'>{risk_badge}</div>", unsafe_allow_html=True)
+
+                with cols[2]:
+                    st.markdown(
+                        "<div style='color: #8B8FA3; font-size: 0.75rem; margin-bottom: 0.2rem;'>Owner</div>",
+                        unsafe_allow_html=True,
+                    )
+                    st.markdown(owner_display, unsafe_allow_html=True)
+
+                with cols[3]:
+                    st.markdown(
+                        "<div style='color: #8B8FA3; font-size: 0.75rem; margin-bottom: 0.2rem;'>Status & Deadline</div>",
+                        unsafe_allow_html=True,
+                    )
+                    st.markdown(status_badge, unsafe_allow_html=True)
+                    st.markdown(f"<div style='font-size: 0.8rem; margin-top: 0.3rem;'>{deadline}</div>", unsafe_allow_html=True)
+
+                with cols[4]:
+                    st.markdown("<div style='color: #8B8FA3; font-size: 0.75rem;'>Progress</div>", unsafe_allow_html=True)
+                    st.markdown(progress_html, unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -243,6 +341,15 @@ def render_day_simulation(current_day: int):
 
 def render_actions_panel(decision_data: dict):
     """Render the escalation and autonomous actions panel."""
+    if decision_data and decision_data.get("error"):
+        st.markdown(
+            '<div class="error-alert-banner"><div class="alert-icon">⛔</div><div class="alert-body">'
+            '<div class="alert-title">Decision stage error</div>'
+            f'<div class="alert-text">{h(decision_data.get("error", "Unknown error"))}</div></div></div>',
+            unsafe_allow_html=True,
+        )
+        return
+
     if not decision_data:
         st.markdown("""
         <div class="glass-card" style="text-align: center; padding: 2rem; color: #8B8FA3;">
@@ -303,107 +410,123 @@ def render_actions_panel(decision_data: dict):
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    tab1, tab2, tab3 = st.tabs([
-        f"⚡ Actions ({len(actions)})",
-        f"🚨 Escalations ({len(escalations)})",
-        f"🔔 Reminders ({len(reminders)})",
-    ])
+    # ── Section: Auto assignments & corrective actions ─────────
+    st.markdown(
+        f'<div class="action-section-title">⚡ Auto assignments & corrective actions ({len(actions)})</div>',
+        unsafe_allow_html=True,
+    )
+    if actions:
+        for action in actions:
+            icon = action.get("icon", "⚡")
+            action_type = action.get("type", "").replace("_", " ").title()
+            card_class = "assignment-card" if "assign" in action.get("type", "") else "action-card"
 
-    with tab1:
-        if actions:
-            for action in actions:
-                icon = action.get("icon", "⚡")
-                action_type = action.get("type", "").replace("_", " ").title()
-                card_class = "assignment-card" if "assign" in action.get("type", "") else "action-card"
-
-                # Determine what changed
-                prev_owner = action.get("previous_owner", "")
-                new_owner = action.get("new_owner", "")
-                owner_change_html = ""
-                if prev_owner and new_owner:
-                    owner_change_html = f'<div class="owner-change"><span class="owner-from">{prev_owner}</span> → <span class="owner-to">{new_owner}</span></div>'
-
-                safe_title = h(action.get("task_title", ""))[:70]
-                if len(action.get("task_title", "")) > 70:
-                    safe_title += "..."
-                safe_action_text = h(action.get("action", ""))
-                safe_reasoning = h(action.get("reasoning", ""))
-
-                card_html = (
-                    f'<div class="action-card {card_class} animate-slide-in">'
-                    f'<div class="action-header">'
-                    f'<span class="action-type-badge">{icon} {action_type}</span>'
-                    f'<span class="action-task-id">{action.get("task_id", "")}</span>'
-                    f'</div>'
-                    f'<div class="action-title">{safe_title}</div>'
-                    f'<div class="action-detail">{safe_action_text}</div>'
-                    f'{owner_change_html}'
-                    f'<div class="action-reasoning">💭 {safe_reasoning}</div>'
-                    f'</div>'
+            prev_owner = action.get("previous_owner", "")
+            new_owner = action.get("new_owner", "")
+            owner_change_html = ""
+            if prev_owner and new_owner:
+                owner_change_html = (
+                    f'<div class="owner-change"><span class="owner-from">{h(prev_owner)}</span> → '
+                    f'<span class="owner-to">{h(new_owner)}</span></div>'
                 )
-                st.markdown(card_html, unsafe_allow_html=True)
-        else:
-            st.markdown("""
-            <div style="text-align: center; padding: 1.5rem; color: #8B8FA3;">
-                <div style="font-size: 1.2rem;">✅</div>
-                <div style="font-size: 0.85rem; margin-top: 0.3rem;">No corrective actions needed.</div>
-                <div style="font-size: 0.75rem; margin-top: 0.2rem;">Try Day 2 or Day 3 for more action.</div>
+
+            safe_title = h(action.get("task_title", ""))[:70]
+            if len(action.get("task_title", "")) > 70:
+                safe_title += "..."
+            safe_action_text = h(action.get("action", ""))
+            safe_reasoning = h(action.get("reasoning", action.get("reason", "")))
+
+            card_html = (
+                f'<div class="action-card {card_class} animate-slide-in">'
+                f'<div class="action-header">'
+                f'<span class="action-type-badge">{icon} {h(action_type)}</span>'
+                f'<span class="action-task-id">{h(action.get("task_id", ""))}</span>'
+                f"</div>"
+                f'<div class="action-title">{safe_title}</div>'
+                f'<div class="action-detail">{safe_action_text}</div>'
+                f"{owner_change_html}"
+                f'<div class="action-reasoning">💭 {safe_reasoning}</div>'
+                f"</div>"
+            )
+            st.markdown(card_html, unsafe_allow_html=True)
+    else:
+        st.markdown(
+            """
+            <div class="glass-card" style="text-align: center; padding: 1.25rem; color: #8B8FA3;">
+                <div style="font-size: 1.1rem;">✅</div>
+                <div style="font-size: 0.85rem; margin-top: 0.3rem;">No corrective actions on this cycle.</div>
             </div>
-            """, unsafe_allow_html=True)
+            """,
+            unsafe_allow_html=True,
+        )
 
-    with tab2:
-        if escalations:
-            for esc in escalations:
-                safe_title = h(esc.get("task_title", ""))[:70]
-                safe_action_text = h(esc.get("action", ""))
-                safe_reason = h(esc.get("reason", ""))
-                target = h(esc.get("target", "Engineering Manager"))
-                card_html = (
-                    '<div class="action-card escalation-card animate-slide-in">'
-                    '<div class="action-header">'
-                    '<span class="action-type-badge" style="color: #FF4B4B;">🚨 ESCALATION</span>'
-                    f'<span class="action-task-id">{esc.get("task_id", "")}</span>'
-                    '</div>'
-                    f'<div class="action-title">{safe_title}</div>'
-                    f'<div class="action-detail">{safe_action_text}</div>'
-                    f'<div class="action-reasoning">🎯 Target: <b>{target}</b> | Reason: {safe_reason}</div>'
-                    f'<div class="escalation-badge">⚡ Priority: {esc.get("priority", "P0")}</div>'
-                    '</div>'
-                )
-                st.markdown(card_html, unsafe_allow_html=True)
-        else:
-            st.markdown("""
-            <div style="text-align: center; padding: 1.5rem; color: #8B8FA3;">
-                <div style="font-size: 1.2rem;">✅</div>
-                <div style="font-size: 0.85rem; margin-top: 0.3rem;">No escalations triggered on this day.</div>
+    # ── Section: Escalations ───────────────────────────────────
+    st.markdown(
+        f'<div class="action-section-title">🚨 Escalations ({len(escalations)})</div>',
+        unsafe_allow_html=True,
+    )
+    if escalations:
+        for esc in escalations:
+            safe_title = h(esc.get("task_title", ""))[:70]
+            safe_action_text = h(esc.get("action", ""))
+            safe_reason = h(esc.get("reason", esc.get("reasoning", "")))
+            target = h(esc.get("target", "Engineering Manager"))
+            card_html = (
+                '<div class="action-card escalation-card animate-slide-in">'
+                '<div class="action-header">'
+                '<span class="action-type-badge" style="color: #FF4B4B;">🚨 ESCALATION</span>'
+                f'<span class="action-task-id">{h(esc.get("task_id", ""))}</span>'
+                "</div>"
+                f'<div class="action-title">{safe_title}</div>'
+                f'<div class="action-detail">{safe_action_text}</div>'
+                f'<div class="action-reasoning">🎯 Target: <b>{target}</b> | Reason: {safe_reason}</div>'
+                f'<div class="escalation-badge">⚡ Priority: {h(esc.get("priority", "P0"))}</div>'
+                "</div>"
+            )
+            st.markdown(card_html, unsafe_allow_html=True)
+    else:
+        st.markdown(
+            """
+            <div class="glass-card" style="text-align: center; padding: 1.25rem; color: #8B8FA3;">
+                <div style="font-size: 1.1rem;">✅</div>
+                <div style="font-size: 0.85rem; margin-top: 0.3rem;">No escalations on this day.</div>
             </div>
-            """, unsafe_allow_html=True)
+            """,
+            unsafe_allow_html=True,
+        )
 
-    with tab3:
-        if reminders:
-            for rem in reminders:
-                safe_title = h(rem.get("task_title", ""))[:70]
-                safe_action_text = h(rem.get("action", ""))
-                safe_reason = h(rem.get("reason", ""))
-                card_html = (
-                    '<div class="action-card reminder-card animate-slide-in">'
-                    '<div class="action-header">'
-                    '<span class="action-type-badge" style="color: #FFB800;">🔔 REMINDER</span>'
-                    f'<span class="action-task-id">{rem.get("task_id", "")}</span>'
-                    '</div>'
-                    f'<div class="action-title">{safe_title}</div>'
-                    f'<div class="action-detail">{safe_action_text}</div>'
-                    f'<div class="action-reasoning">📋 Reason: {safe_reason}</div>'
-                    '</div>'
-                )
-                st.markdown(card_html, unsafe_allow_html=True)
-        else:
-            st.markdown("""
-            <div style="text-align: center; padding: 1.5rem; color: #8B8FA3;">
-                <div style="font-size: 1.2rem;">✅</div>
+    # ── Section: Reminders ──────────────────────────────────────
+    st.markdown(
+        f'<div class="action-section-title">🔔 Reminders ({len(reminders)})</div>',
+        unsafe_allow_html=True,
+    )
+    if reminders:
+        for rem in reminders:
+            safe_title = h(rem.get("task_title", ""))[:70]
+            safe_action_text = h(rem.get("action", ""))
+            safe_reason = h(rem.get("reason", ""))
+            card_html = (
+                '<div class="action-card reminder-card animate-slide-in">'
+                '<div class="action-header">'
+                '<span class="action-type-badge" style="color: #FFB800;">🔔 REMINDER</span>'
+                f'<span class="action-task-id">{h(rem.get("task_id", ""))}</span>'
+                "</div>"
+                f'<div class="action-title">{safe_title}</div>'
+                f'<div class="action-detail">{safe_action_text}</div>'
+                f'<div class="action-reasoning">📋 Reason: {safe_reason}</div>'
+                "</div>"
+            )
+            st.markdown(card_html, unsafe_allow_html=True)
+    else:
+        st.markdown(
+            """
+            <div class="glass-card" style="text-align: center; padding: 1.25rem; color: #8B8FA3;">
+                <div style="font-size: 1.1rem;">✅</div>
                 <div style="font-size: 0.85rem; margin-top: 0.3rem;">No reminders sent on this day.</div>
             </div>
-            """, unsafe_allow_html=True)
+            """,
+            unsafe_allow_html=True,
+        )
 
 
 def render_risk_chart(tasks: list):
@@ -454,7 +577,7 @@ def render_risk_chart(tasks: list):
             p = t.get("priority", "P2")
             priority_counts[p] = priority_counts.get(p, 0) + 1
 
-        priority_colors = {"P0": "#FF4B4B", "P1": "#FFB800", "P2": "#45B7D1"}
+        priority_colors = {"P0": "#FF4B4B", "P1": "#FFB800", "P2": "#22C55E"}
 
         fig2 = go.Figure(data=[go.Bar(
             x=list(priority_counts.keys()),

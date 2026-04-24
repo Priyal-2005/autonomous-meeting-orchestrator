@@ -13,6 +13,14 @@ def render_pipeline(agents: list, current_agent: str = None):
 
     st.markdown('<div class="section-header"><span class="header-icon">🔄</span> Agent Pipeline <span class="header-badge">LIVE</span></div>', unsafe_allow_html=True)
 
+    st.markdown(
+        '<div class="pipeline-flow-label">'
+        "<span>Extraction</span> → <span>Intelligence</span> → <span>Execution</span> → "
+        "<span>Tracking</span> → <span>Decision</span>"
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
     # Build pipeline HTML
     cards_html = '<div class="pipeline-container">'
 

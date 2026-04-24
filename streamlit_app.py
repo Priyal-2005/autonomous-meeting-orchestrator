@@ -21,9 +21,22 @@ from components.dashboard import (
     render_actions_panel,
     render_risk_chart,
     render_summary_banner,
+    render_pipeline_error_alert,
+    render_executive_metrics_bar,
 )
 from components.audit import render_audit_trail
 from utils.helpers import extract_text_from_file, export_to_json, export_to_csv
+
+
+def _collect_agent_errors(orch: WorkflowOrchestrator) -> str | None:
+    """Human-readable agent errors after a failed run."""
+    parts = []
+    for agent in orch.agent_list:
+        err = getattr(agent, "error", None)
+        if err:
+            parts.append(f"{agent.name}: {err}")
+    return " · ".join(parts) if parts else None
+
 
 # ── PAGE CONFIG ──────────────────────────────────────
 st.set_page_config(
@@ -237,9 +250,20 @@ if run_clicked and transcript_text.strip():
         
         # Actually run the pipeline
         result = st.session_state.orchestrator.run_pipeline(transcript_text.strip())
-        
-        status.update(label="✅ Pipeline complete — All agents succeeded!", state="complete", expanded=False)
-        time.sleep(0.4)
+        pipeline_ok = result.get("pipeline_status") == "complete"
+        if pipeline_ok:
+            status.update(
+                label="Pipeline complete — all agents succeeded",
+                state="complete",
+                expanded=False,
+            )
+        else:
+            status.update(
+                label="Pipeline stopped — one or more agents reported an error",
+                state="error",
+                expanded=False,
+            )
+        time.sleep(0.25)
 
     st.session_state.pipeline_ran = True
     st.session_state.current_day = 1
@@ -254,21 +278,43 @@ orch = st.session_state.orchestrator
 # ── DISPLAY RESULTS ──────────────────────────────────
 if st.session_state.pipeline_ran and orch.state.get("pipeline_status") in ("complete", "error"):
     state = orch.state
+    pipeline_ok = state.get("pipeline_status") == "complete"
 
-    # ── SUMMARY BANNER ──────────────────────────────
     tasks = state.get("tasks", [])
-    decision = state.get("decision", {})
-    tracking = state.get("tracking", {})
+    decision = state.get("decision") or {}
+    tracking = state.get("tracking") or {}
+    intelligence = state.get("intelligence") or {}
     issues = tracking.get("issues", [])
-    actions = decision.get("actions_taken", []) if decision else []
-    escalations = decision.get("escalations", []) if decision else []
-    reminders = decision.get("reminders", []) if decision else []
+    actions = decision.get("actions_taken", []) if isinstance(decision, dict) else []
+    escalations = decision.get("escalations", []) if isinstance(decision, dict) else []
+    reminders = decision.get("reminders", []) if isinstance(decision, dict) else []
+
+    if not pipeline_ok:
+        render_pipeline_error_alert(_collect_agent_errors(orch))
+
+    stats_preview = tracking.get("stats", {})
+    if not stats_preview and tasks:
+        stats_preview = {
+            "total": len(tasks),
+            "completed": sum(1 for t in tasks if t.get("status") == "completed"),
+            "in_progress": sum(1 for t in tasks if t.get("status") == "in-progress"),
+            "pending": sum(1 for t in tasks if t.get("status") == "pending"),
+            "delayed": sum(1 for t in tasks if t.get("status") == "delayed"),
+            "blocked": sum(1 for t in tasks if t.get("status") == "blocked"),
+        }
+
+    render_executive_metrics_bar(
+        tasks,
+        stats_preview,
+        intelligence.get("overall_risk"),
+    )
 
     render_summary_banner(
         total_tasks=len(tasks),
         issues_detected=len(issues),
         actions_taken=len(actions) + len(escalations) + len(reminders),
         llm_mode=orch.llm.mode,
+        pipeline_status=state.get("pipeline_status", "complete"),
     )
 
     st.markdown("<br>", unsafe_allow_html=True)
@@ -308,14 +354,21 @@ if st.session_state.pipeline_ran and orch.state.get("pipeline_status") in ("comp
 
     st.markdown("---")
 
-    # ── TIME SIMULATION ──────────────────────────────
-    new_day = render_day_simulation(st.session_state.current_day)
-    if new_day != st.session_state.current_day:
-        st.session_state.current_day = new_day
-        orch.simulate_day(new_day)
-        # Persist the updated orchestrator
-        st.session_state.orchestrator = orch
-        st.rerun()
+    # ── TIME SIMULATION (only after a successful full pipeline) ──
+    if pipeline_ok:
+        new_day = render_day_simulation(st.session_state.current_day)
+        if new_day != st.session_state.current_day:
+            st.session_state.current_day = new_day
+            orch.simulate_day(new_day)
+            st.session_state.orchestrator = orch
+            st.rerun()
+    else:
+        st.markdown(
+            '<div class="glass-card" style="padding:1rem 1.25rem; color:#8B8FA3; font-size:0.9rem;">'
+            "<b style='color:#FAFAFA;'>Time simulation</b> is disabled until the pipeline completes successfully. "
+            "Fix the error above and run again.</div>",
+            unsafe_allow_html=True,
+        )
 
     st.markdown("---")
 
@@ -325,7 +378,6 @@ if st.session_state.pipeline_ran and orch.state.get("pipeline_status") in ("comp
     tracking = state.get("tracking", {})
     decision = state.get("decision", {})
 
-    # Compute stats from tracking or derive from tasks
     stats = tracking.get("stats", {})
     if not stats:
         stats = {
@@ -337,7 +389,6 @@ if st.session_state.pipeline_ran and orch.state.get("pipeline_status") in ("comp
             "blocked": sum(1 for t in tasks if t.get("status") == "blocked"),
         }
 
-    # ── METRICS ─────────────────────────────────────
     render_metrics(stats, st.session_state.current_day)
 
     st.markdown("<br>", unsafe_allow_html=True)
@@ -346,16 +397,23 @@ if st.session_state.pipeline_ran and orch.state.get("pipeline_status") in ("comp
     ins_col1, ins_col2 = st.columns([2, 1])
     
     with ins_col1:
-        st.markdown('### 💡 AI Insights')
-        # Load from LLM based on memory and current tasks
+        st.markdown("### 💡 AI Insights")
         from utils.memory import MemoryStore
+
         memory_stats = MemoryStore().get_historical_context()
-        
-        with st.spinner("Generating insights..."):
-            insights = orch.llm.generate_insights(tasks, memory_stats)
+
+        if pipeline_ok:
+            with st.spinner("Generating insights..."):
+                insights = orch.llm.generate_insights(tasks, memory_stats)
+                with st.container(border=True):
+                    st.markdown("**(Live AI assessment)**")
+                    st.markdown(insights)
+        else:
             with st.container(border=True):
-                st.markdown("**(Live AI Assessment)**")
-                st.markdown(insights)
+                st.warning(
+                    "Insights are unavailable because the pipeline did not complete successfully. "
+                    "Re-run after resolving the error."
+                )
             
     with ins_col2:
         st.markdown('### 🎛️ What-If Simulation')
@@ -395,28 +453,36 @@ if st.session_state.pipeline_ran and orch.state.get("pipeline_status") in ("comp
         render_audit_trail(orch.audit_logger)
 
 else:
-    # ── WELCOME STATE ────────────────────────────────
+    # ── WELCOME STATE (empty — pipeline not yet run) ─────────────────────
     st.markdown("<br>", unsafe_allow_html=True)
 
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        st.markdown("""
-        <div class="glass-card-accent" style="text-align: center; padding: 2rem;">
-            <div style="font-size: 3rem; margin-bottom: 0.5rem;">🚀</div>
-            <div style="font-size: 1.2rem; font-weight: 700; color: #FAFAFA; margin-bottom: 0.5rem;">
-                Ready to Orchestrate
+        st.markdown(
+            """
+        <div class="landing-hero">
+            <div style="font-size:3rem;margin-bottom:0.35rem;">🧠</div>
+            <h2>FlowMind Command Center</h2>
+            <p>
+                Connect unstructured workflow text to a <b>five-agent</b> pipeline:
+                extract, assess risk, structure tasks, simulate time, and execute
+                autonomous corrections — with full audit and export.
+            </p>
+            <div class="landing-pill-row">
+                <span class="landing-pill">Extraction</span>
+                <span class="landing-pill">Intelligence</span>
+                <span class="landing-pill">Execution</span>
+                <span class="landing-pill">Tracking</span>
+                <span class="landing-pill">Decision</span>
             </div>
-            <div style="color: #8B8FA3; font-size: 0.9rem; margin-bottom: 1rem;">
-                Select a workflow input from the sidebar or upload a file, then click 
-                <span style="color: #00D4AA; font-weight: 600;">"Run Autonomous Workflow"</span>
-                to activate the multi-agent pipeline.
-            </div>
-            <div style="color: #5A5E73; font-size: 0.75rem;">
-                The system will extract action items, detect risks, create tasks,<br>
-                simulate time progression, and take autonomous corrective actions.
-            </div>
+            <p style="margin-top:1.25rem;font-size:0.85rem;color:#5A5E73;">
+                Use the sidebar to pick a sample or upload a file, then
+                <span style="color:#00D4AA;font-weight:600;">Run Autonomous Workflow</span>.
+            </p>
         </div>
-        """, unsafe_allow_html=True)
+            """,
+            unsafe_allow_html=True,
+        )
 
     st.markdown("<br>", unsafe_allow_html=True)
 
