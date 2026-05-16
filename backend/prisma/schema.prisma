@@ -1,0 +1,68 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  password  String?
+  avatar    String?
+  provider  String   @default("local")
+  createdAt DateTime @default(now())
+
+  profile   Profile?
+  posts     Post[]
+  comments  Comment[]
+  likes     Like[]
+}
+
+model Profile {
+  id           String @id @default(cuid())
+  userId       String @unique
+  bio          String?
+  skills       Json?
+  githubUrl    String?
+  portfolioUrl String?
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+model Post {
+  id        String   @id @default(cuid())
+  title     String
+  content   String
+  authorId  String
+  createdAt DateTime @default(now())
+
+  author   User      @relation(fields: [authorId], references: [id])
+  comments Comment[]
+  likes    Like[]
+}
+
+model Comment {
+  id        String  @id @default(cuid())
+  content   String
+  postId    String
+  userId    String
+  parentId  String?
+
+  post   Post @relation(fields: [postId], references: [id])
+  user   User @relation(fields: [userId], references: [id])
+}
+
+model Like {
+  id     String @id @default(cuid())
+  userId String
+  postId String
+
+  user User @relation(fields: [userId], references: [id])
+  post Post @relation(fields: [postId], references: [id])
+
+  @@unique([userId, postId])
+}
